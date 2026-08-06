@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Biometrics Attendance</title>
+  <style>
+    body {background:#f0f0f0;font-family:'Segoe UI',Tahoma,Verdana,sans-serif;}
+    .formBox {margin:20px;text-align:center;}
+    .cardContainer {display:flex;flex-wrap:wrap;justify-content:flex-start;}
+    .card {
+      background:white;
+      box-shadow:1px 1px 5px rgba(0,0,0,0.2);
+      border-radius:6px;
+      margin:10px;
+      padding:10px;
+      width:320px;
+    }
+    .card h3 {margin:0 0 6px 0;font-size:14px;}
+    table {width:100%;border-collapse:collapse;font-size:11px;}
+    td,th {border:1px solid #999;padding:3px;text-align:left;}
+    @page {size:8.5in 13in landscape;margin:0.7cm;}
+    @media print {.formBox{display:none}.card{box-shadow:none;border:1px solid #000}}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+  <div class="formBox">
+    <h2>Upload Attendance & Names CSV</h2>
+    <label>Attendance CSV: <input type="file" id="attendanceFile" accept=".csv"></label><br><br>
+    <label>Names CSV: <input type="file" id="namesFile" accept=".csv"></label><br><br>
+    <button onclick="processFiles()">Process Records</button>
+    <button onclick="window.print()">Print</button>
+  </div>
+  <div class="cardContainer" id="cards"></div>
+
+<script>
+// Official time rules
+function getOfficialTimes(dateStr) {
+  const date = new Date(dateStr);
+  const day = date.getDay(); // 0=Sun, 6=Sat
+  if (day === 6) { // Saturday
+    return {in:"08:00:00", out:"12:00:00"};
+  }
+  return {in:"08:00:00", out:"17:00:00"}; // weekdays
+}
+
+// Compute minutes late
+function computeMinutesLate(actualDateTime, expectedTime) {
+  const actual = new Date(actualDateTime);
+  const datePart = actual.toISOString().split("T")[0];
+  const expected = new Date(`${datePart}T${expectedTime}`);
+  if (actual > expected) {
+    return Math.round((actual - expected)/60000);
+  }
+  return 0;
+}
+
+function processFiles() {
+  const attFile = document.getElementById("attendanceFile").files[0];
+  const namesFile = document.getElementById("namesFile").files[0];
+  if (!attFile || !namesFile) {
+    alert("Please upload both Attendance and Names CSV.");
+    return;
+  }
+
+  // Parse both files
+  Papa.parse(namesFile, {
+    header:true, skipEmptyLines:true,
+    complete: function(namesRes) {
+      const namesList = namesRes.data.map(r => r["name"]?.trim()).filter(Boolean);
+
+      Papa.parse(attFile, {
+        header:true, skipEmptyLines:true,
+        complete: function(attRes) {
+          const data = attRes.data.map(r => ({
+            name: r["name"]?.trim(),
+            datetime: r["date/time"],
+            status: r["status"]?.toLowerCase().trim()
+          }));
+
+          const grouped = {};
+          data.forEach(r => {
+            const dt = new Date(r.datetime);
+            if (isNaN(dt)) return;
+            const date = dt.toISOString().split("T")[0];
+            const key = `${r.name}_${date}`;
+            if (!grouped[key]) grouped[key] = {name:r.name,date,records:[]};
+            grouped[key].records.push({dt,status:r.status});
+          });
+
+          // Process each day per person
+          const processed = {};
+          Object.values(grouped).forEach(dayRec => {
+            const {name,date,records} = dayRec;
+            records.sort((a,b)=>a.dt-b.dt);
+            let timeIn=null,timeOut=null,anomalies=[];
+            records.forEach(r=>{
+              const timeStr = r.dt.toTimeString().split(" ")[0];
+              if (r.status==="in") {
+                if (!timeIn) timeIn=timeStr; else anomalies.push(r);
+              } else if (r.status==="out") {
+                timeOut=timeStr; // keep last out
+              } else {
+                anomalies.push(r);
+              }
+            });
+            if (!processed[name]) processed[name]=[];
+            const official=getOfficialTimes(date);
+            const minutesLate = timeIn ? computeMinutesLate(`${date}T${timeIn}`,official.in) : null;
+            processed[name].push({date,timeIn,timeOut,minutesLate,anomalies});
+          });
+
+          // Detect absences
+          namesList.forEach(n=>{
+            if (!processed[n]) processed[n]=[{date:"(no records)",timeIn:null,timeOut:null,minutesLate:null,anomalies:[]}];
+          });
+
+          renderCards(processed);
+        }
+      });
+    }
+  });
+}
+
+function renderCards(processed) {
+  const container=document.getElementById("cards");
+  container.innerHTML="";
+  Object.entries(processed).forEach(([name,days])=>{
+    let html=`<div class="card"><h3>${name}</h3><table><tr><th>Date</th><th>In</th><th>Out</th><th>Late(min)</th><th>Anomalies</th></tr>`;
+    days.forEach(d=>{
+      html+=`<tr><td>${d.date}</td><td>${d.timeIn||"-"}</td><td>${d.timeOut||"-"}</td><td>${d.minutesLate!==null?d.minutesLate:"-"}</td><td>${d.anomalies.length}</td></tr>`;
+    });
+    html+="</table></div>";
+    container.innerHTML+=html;
+  });
+}
+</script>
+</body>
+</html>

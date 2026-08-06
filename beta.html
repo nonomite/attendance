@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Biometrics Attendance</title>
+  <style>
+    body {background:#f0f0f0;font-family:'Segoe UI',Tahoma,Verdana,sans-serif;}
+    .formBox {margin:20px;text-align:center;}
+    .cardContainer {display:flex;flex-wrap:wrap;justify-content:flex-start;}
+    .card {
+      background:white;
+      box-shadow:1px 1px 5px rgba(0,0,0,0.2);
+      border-radius:6px;
+      margin:10px;
+      padding:10px;
+      width:320px;
+    }
+    .card h3 {margin:0 0 6px 0;font-size:14px;}
+    table {width:100%;border-collapse:collapse;font-size:11px;}
+    td,th {border:1px solid #999;padding:3px;text-align:left;}
+    @page {size:8.5in 13in landscape;margin:0.7cm;}
+    @media print {.formBox{display:none}.card{box-shadow:none;border:1px solid #000}}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+  <div class="formBox">
+    <h2>Upload Attendance & Names CSV</h2>
+    <label>Attendance CSV: <input type="file" id="attendanceFile" accept=".csv"></label><br><br>
+    <label>Names CSV: <input type="file" id="namesFile" accept=".csv"></label><br><br>
+    <button onclick="processFiles()">Process Records</button>
+    <button onclick="window.print()">Print</button>
+  </div>
+  <div class="cardContainer" id="cards"></div>
+
+<script>
+const OFFICIAL_IN = "08:00:00";
+const OFFICIAL_OUT = "17:00:00";
+
+function toLocalDateStr(dt) {
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth()+1).padStart(2,"0");
+  const d = String(dt.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
+}
+
+function computeMinutesLate(actualDateTime, expectedTime) {
+  const actual = new Date(actualDateTime);
+  const datePart = toLocalDateStr(actual);
+  const expected = new Date(`${datePart}T${expectedTime}`);
+  if (actual > expected) {
+    return Math.round((actual - expected)/60000);
+  }
+  return 0;
+}
+
+function processFiles() {
+  const attFile = document.getElementById("attendanceFile").files[0];
+  const namesFile = document.getElementById("namesFile").files[0];
+  if (!attFile || !namesFile) {
+    alert("Please upload both Attendance and Names CSV.");
+    return;
+  }
+  if (typeof Papa === "undefined") {
+    alert("CSV parser failed to load (PapaParse). Check your internet connection and reload the page.");
+    return;
+  }
+
+  Papa.parse(namesFile, {
+    header:true, skipEmptyLines:true,
+    transformHeader: h => h.trim().toLowerCase(),
+    error: function(err) {
+      alert("Failed to read Names CSV: " + err.message);
+    },
+    complete: function(namesRes) {
+      const namesList = namesRes.data.map(r => r["name"]?.trim()).filter(Boolean);
+      if (namesList.length === 0) {
+        alert('No names found. Make sure the Names CSV has a "name" column with values.');
+        return;
+      }
+
+      Papa.parse(attFile, {
+        header:true, skipEmptyLines:true,
+        transformHeader: h => h.trim().toLowerCase(),
+        error: function(err) {
+          alert("Failed to read Attendance CSV: " + err.message);
+        },
+        complete: function(attRes) {
+          const data = attRes.data.map(r => ({
+            name: r["name"]?.trim(),
+            datetime: r["date/time"],
+            status: r["status"]?.toLowerCase().trim()
+          })).filter(r => r.name && r.datetime);
+
+          // Index attendance punches by normalized name, then by local date,
+          // so each roster name can be searched for regardless of the order
+          // (or stray/typo'd names) in the biometrics export.
+          const byName = {};
+          data.forEach(r => {
+            const dt = new Date(r.datetime);
+            if (isNaN(dt)) return;
+            const normName = r.name.toLowerCase();
+            const date = toLocalDateStr(dt);
+            if (!byName[normName]) byName[normName] = {};
+            if (!byName[normName][date]) byName[normName][date] = [];
+            byName[normName][date].push({dt,status:r.status});
+          });
+
+          const processed = {};
+          namesList.forEach(name => {
+            const dayGroups = byName[name.toLowerCase()];
+            if (!dayGroups) {
+              processed[name] = [{date:"(no records)",timeIn:null,timeOut:null,minutesLate:null}];
+              return;
+            }
+            processed[name] = Object.keys(dayGroups).sort().map(date => {
+              const records = dayGroups[date].sort((a,b)=>a.dt-b.dt);
+              const timeIn = records[0]?.dt.toTimeString().split(" ")[0] || null;
+              const timeOut = records[records.length-1]?.dt.toTimeString().split(" ")[0] || null;
+              const minutesLate = timeIn ? computeMinutesLate(`${date}T${timeIn}`,OFFICIAL_IN) : null;
+              return {date,timeIn,timeOut,minutesLate};
+            });
+          });
+
+          renderCards(processed);
+        }
+      });
+    }
+  });
+}
+
+function renderCards(processed) {
+  const container=document.getElementById("cards");
+  container.innerHTML="";
+  Object.entries(processed).forEach(([name,days])=>{
+    let html=`<div class="card"><h3>${name}</h3><table><tr><th>Date</th><th>In</th><th>Out</th><th>Late(min)</th></tr>`;
+    days.forEach(d=>{
+      html+=`<tr><td>${d.date}</td><td>${d.timeIn||"-"}</td><td>${d.timeOut||"-"}</td><td>${d.minutesLate!==null?d.minutesLate:"-"}</td></tr>`;
+    });
+    html+="</table></div>";
+    container.innerHTML+=html;
+  });
+}
+</script>
+</body>
+</html>
