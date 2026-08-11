@@ -30,6 +30,7 @@
     <label>Biometrics CSV: <input type="file" id="attendanceFile" accept=".csv"></label><br><br>
     <label>Users CSV: <input type="file" id="namesFile" accept=".csv"></label><br><br>
     <button onclick="processFiles()">Process Records</button>
+    <button onclick="sortByName()">Sort by Name</button>
     <button onclick="window.print()">Print</button>
   </div>
   <div class="cardContainer" id="cards"></div>
@@ -154,6 +155,17 @@ function computeMinutesLate(actualDateTime, expectedTime) {
   return 0;
 }
 
+let currentUsers = [];
+let nameSortAscending = true;
+
+function sortByName() {
+  if (!currentUsers.length) return;
+  currentUsers.sort((a, b) => a.name.localeCompare(b.name, undefined, {sensitivity: "base"}));
+  if (!nameSortAscending) currentUsers.reverse();
+  nameSortAscending = !nameSortAscending;
+  renderCards(currentUsers);
+}
+
 async function processFiles() {
   const attFile = document.getElementById("attendanceFile").files[0];
   const namesFile = document.getElementById("namesFile").files[0];
@@ -228,7 +240,9 @@ async function processFiles() {
       ...unmatchedData
     ];
 
-    renderCards(processed);
+    currentUsers = processed;
+    nameSortAscending = true;
+    renderCards(currentUsers);
   } catch (err) {
     alert("Failed to read the uploaded CSV files: " + err.message);
   }
