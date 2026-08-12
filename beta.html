@@ -31,7 +31,10 @@
     <label>Users CSV: <input type="file" id="namesFile" accept=".csv"></label><br><br>
     <button onclick="processFiles()">Process Records</button>
     <button onclick="sortByName()">Sort by Name</button>
-    <button onclick="window.print()">Print</button>
+    <button onclick="window.print()">Print</button><br><br>
+    <label>View: <select id="userSelect" onchange="filterUser()">
+      <option value="all">All Users</option>
+    </select></label>
   </div>
   <div class="cardContainer" id="cards"></div>
 
@@ -163,7 +166,30 @@ function sortByName() {
   currentUsers.sort((a, b) => a.name.localeCompare(b.name, undefined, {sensitivity: "base"}));
   if (!nameSortAscending) currentUsers.reverse();
   nameSortAscending = !nameSortAscending;
-  renderCards(currentUsers);
+  populateUserSelect();
+  filterUser();
+}
+
+function populateUserSelect() {
+  const select = document.getElementById("userSelect");
+  const previousValue = select.value || "all";
+  select.innerHTML = '<option value="all">All Users</option>';
+  currentUsers.forEach(user => {
+    const option = document.createElement("option");
+    option.value = user.id;
+    option.textContent = `${user.name} (${user.id})`;
+    select.appendChild(option);
+  });
+  const stillExists = previousValue === "all" || currentUsers.some(user => user.id === previousValue);
+  select.value = stillExists ? previousValue : "all";
+}
+
+function filterUser() {
+  const selectedId = document.getElementById("userSelect").value;
+  const usersToRender = selectedId === "all"
+    ? currentUsers
+    : currentUsers.filter(user => user.id === selectedId);
+  renderCards(usersToRender);
 }
 
 async function processFiles() {
@@ -242,7 +268,8 @@ async function processFiles() {
 
     currentUsers = processed;
     nameSortAscending = true;
-    renderCards(currentUsers);
+    populateUserSelect();
+    filterUser();
   } catch (err) {
     alert("Failed to read the uploaded CSV files: " + err.message);
   }
