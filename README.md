@@ -1,4 +1,4 @@
-# Attendance
+# AttendanceCSVTool
 
 An attendance tracker that processes biometric records and validates scholar time-ins/time-outs.
 
